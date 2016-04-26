@@ -100,6 +100,11 @@ bool parse_config_file(const char* filename, event_list_t* out_list) {
             continue;
         }
 
+        if (!parse_event(line, &event)) {
+            WARN("Found invalid event: %s", line);
+            continue;
+        }
+
         event_list_push(out_list, &event);
     }
 

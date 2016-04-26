@@ -95,8 +95,21 @@ int main(int argc, char** argv) {
     }
 
     LOG("events: %s", events_src_filename);
+    event_list_t list = EVENT_LIST_INITIALIZER;
 
-    // TODO: Start the actual networking interface
+    if (!parse_config_file(events_src_filename, &list))
+        FATAL("Failed to parse config, aborting");
+
+    event_list_node_t* current = event_list_head(&list);
+    while (event_list_node_has_value(current)) {
+        event_t* event = event_list_node_value(current);
+        printf("%s: %ld %ld\n", event->description, event->repeat_during,
+                event->repeat_after);
+
+        current = event_list_node_next(current);
+    }
+
+    // TODO
 
     return 0;
 }

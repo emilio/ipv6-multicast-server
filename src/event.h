@@ -56,7 +56,7 @@ typedef struct event_list {
 
 #define EVENT_LIST_INITIALIZER {NULL, NULL, 0}
 
-#define event_list_node_value(n) ((n)->next->event)
+#define event_list_node_value(n) (&(n)->next->event)
 #define event_list_head(l) ((l)->head)
 #define event_list_last(l) ((l)->last)
 #define event_list_size(l) ((l)->size)
