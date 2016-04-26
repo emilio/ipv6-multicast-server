@@ -31,6 +31,8 @@
  *
  * We return a linked list of event_t elements in out_list.
  */
+bool read_long(const char** cursor, long* result);
+
 bool parse_config_file(const char* filename, event_list_t* out_list);
 
 bool parse_event(const char* str, event_t* event);
