@@ -48,7 +48,7 @@ TEST(event_list_push_pop, {
     event_list_pop(&list, &new_event);
     ASSERT(new_event.repeat_after == event.repeat_after);
     ASSERT(new_event.repeat_during == event.repeat_during);
-    ASSERT(event_list_size(&list) == 0);
+    ASSERT(event_list_is_empty(&list));
 })
 
 TEST(event_list_del_middle, {
@@ -57,9 +57,9 @@ TEST(event_list_del_middle, {
     event_list_node_t* current = event_list_head(&list);
     size_t i = 0;
     while (event_list_node_has_value(current)) {
-        event_t event = event_list_node_value(current);
-        ASSERT(event.repeat_after == i);
-        ASSERT(event.repeat_during == i);
+        event_t* event = event_list_node_value(current);
+        ASSERT(event->repeat_after == i);
+        ASSERT(event->repeat_during == i);
 
         if (i == 2) {
             event_list_remove(&list, current);
@@ -72,6 +72,58 @@ TEST(event_list_del_middle, {
     ASSERT(event_list_size(&list) == 4);
 
     event_list_destroy(&list);
+})
+
+TEST(event_list_insert_before, {
+    event_list_t list = EVENT_LIST_INITIALIZER;
+    event_t event = EVENT_INITIALIZER;
+    event.repeat_after = 10;
+
+    event_list_push(&list, &event);
+
+    event_t new_event = EVENT_INITIALIZER;
+    new_event.repeat_after = 1;
+
+    event_list_insert_before(&list, event_list_head(&list), &new_event);
+
+    event_t popped;
+
+    event_list_pop(&list, &popped);
+    ASSERT(popped.repeat_after == 1);
+
+    event_list_pop(&list, &popped);
+    ASSERT(popped.repeat_after == 10);
+
+    ASSERT(event_list_is_empty(&list));
+})
+
+TEST(event_list_push_ordered, {
+    event_list_t list = EVENT_LIST_INITIALIZER;
+    event_t event = EVENT_INITIALIZER;
+    event.repeat_after = 10;
+
+    event_list_push_ordered(&list, &event);
+
+    event.repeat_after = 20;
+    event_list_push_ordered(&list, &event);
+
+    event.repeat_after = 15;
+    event_list_push_ordered(&list, &event);
+
+    ASSERT(event_list_size(&list) == 3);
+
+    event_t popped;
+
+    event_list_pop(&list, &popped);
+    ASSERT(popped.repeat_after == 10);
+
+    event_list_pop(&list, &popped);
+    ASSERT(popped.repeat_after == 15);
+
+    event_list_pop(&list, &popped);
+    ASSERT(popped.repeat_after == 20);
+
+    ASSERT(event_list_is_empty(&list));
 })
 
 TEST(event_parsing, {
@@ -87,5 +139,8 @@ TEST(event_parsing, {
 TEST_MAIN({
     RUN_TEST(event_list_push_pop);
     RUN_TEST(event_list_del_middle);
+    RUN_TEST(event_list_insert_before);
+    RUN_TEST(event_list_push_ordered);
+
     RUN_TEST(event_parsing);
 })

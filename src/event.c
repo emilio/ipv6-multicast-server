@@ -44,7 +44,6 @@ event_list_node_t* make_dummy_list_node() {
     return new_node(&dummy);
 }
 
-
 void event_list_push(event_list_t* l, event_t* event) {
     assert(event);
     if (l->tail == NULL) {
@@ -64,6 +63,27 @@ void event_list_push(event_list_t* l, event_t* event) {
     l->tail->next = new;
     l->tail = new;
     l->size++;
+}
+
+void event_list_push_ordered(event_list_t* l, event_t* new_event) {
+    assert(new_event);
+
+    event_list_node_t* current = event_list_head(l);
+    while (event_list_node_has_value(current)) {
+        event_t* event = event_list_node_value(current);
+
+        // The new one goes before
+        if (new_event->repeat_after < event->repeat_after) {
+            event_list_insert_before(l, current, new_event);
+            return;
+        }
+
+
+        current = event_list_node_next(current);
+    }
+
+    // If we haven't already found somewhere, push at the end.
+    event_list_push(l, new_event);
 }
 
 bool event_list_pop(event_list_t* l, event_t* out_event) {
@@ -101,10 +121,21 @@ void event_list_remove(event_list_t* l, event_list_node_t* node) {
         l->tail = NULL;
     }
 }
+
+void event_list_insert_before(event_list_t* list,
+                              event_list_node_t* node,
+                              event_t* event) {
+    event_list_node_t* old_node = node->next;
+    node->next = new_node(event);
+    node->next->next = old_node;
+    list->size++;
+}
+
 void event_list_destroy(event_list_t* l) {
-    while (l->size) {
+
+    while (!event_list_is_empty(l))
         event_list_pop(l, NULL);
-    }
+
     assert(l->size == 0);
     assert(l->head == NULL);
     assert(l->tail == NULL);

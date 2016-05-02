@@ -33,6 +33,7 @@
 #include <unistd.h>
 #include <poll.h>
 #include <fcntl.h>
+#include <assert.h>
 
 #include "logger.h"
 #include "config.h"
@@ -48,6 +49,47 @@ void show_usage(int _argc, char** argv) {
     fprintf(stderr, "\n");
     fprintf(stderr, "Author(s):\n");
     fprintf(stderr, "  Emilio Cobos Álvarez (<emiliocobos@usal.es>)\n");
+}
+
+bool list_is_ordered(event_list_t* list) {
+    if (event_list_is_empty(list))
+        return true;
+
+    event_list_node_t* current = event_list_head(list);
+
+    assert(event_list_node_has_value(current));
+
+    time_t last = event_list_node_value(current)->repeat_after;
+    current = event_list_node_next(current);
+
+    while (event_list_node_has_value(current)) {
+        event_t* event = event_list_node_value(current);
+        if (event->repeat_after < last)
+            return false;
+
+        last = event->repeat_after;
+        current = event_list_node_next(current);
+    }
+
+    return true;
+}
+
+int run_event_loop(event_list_t* list) {
+    assert(list);
+    assert(list_is_ordered(list));
+
+    event_list_node_t* current = event_list_head(list);
+    while (event_list_node_has_value(current)) {
+        event_t* event = event_list_node_value(current);
+        printf("%s: %ld %ld\n", event->description, event->repeat_during,
+                event->repeat_after);
+
+        current = event_list_node_next(current);
+    }
+
+    // TODO: Dispatch the events.
+
+    return 0;
 }
 
 int main(int argc, char** argv) {
@@ -100,16 +142,5 @@ int main(int argc, char** argv) {
     if (!parse_config_file(events_src_filename, &list))
         FATAL("Failed to parse config, aborting");
 
-    event_list_node_t* current = event_list_head(&list);
-    while (event_list_node_has_value(current)) {
-        event_t* event = event_list_node_value(current);
-        printf("%s: %ld %ld\n", event->description, event->repeat_during,
-                event->repeat_after);
-
-        current = event_list_node_next(current);
-    }
-
-    // TODO
-
-    return 0;
+    return run_event_loop(&list);
 }
