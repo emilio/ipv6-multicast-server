@@ -42,6 +42,7 @@ void show_usage(int _argc, char** argv) {
     fprintf(stderr, "Usage: %s [options]\n", argv[0]);
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -h, --help\t Display this message and exit\n");
+    fprintf(stderr, "  -a, --address [address]\t IPv6 address\n");
     fprintf(stderr, "  -p, --port [port]\t Listen to [port]\n");
     fprintf(stderr, "  -v, --verbose\t Be verbose about what is going on\n");
     fprintf(stderr, "  -l, --log [file]\t Log to [file]\n");
@@ -51,49 +52,97 @@ void show_usage(int _argc, char** argv) {
     fprintf(stderr, "  Emilio Cobos Álvarez (<emiliocobos@usal.es>)\n");
 }
 
-bool list_is_ordered(event_list_t* list) {
-    if (event_list_is_empty(list))
-        return true;
+typedef struct dispatcher_data {
+    int socket;
+    event_t event;
+    pthread_mutex_t* socket_mutex;
+} dispatcher_data_t;
 
-    event_list_node_t* current = event_list_head(list);
+void* event_dispatcher(void* arg) {
+    dispatcher_data_t* data = (dispatcher_data_t*) arg;
+    time_t initial = time(NULL);
+    time_t current_time;
 
-    assert(event_list_node_has_value(current));
+    size_t description_length = strlen(data->event.description);
+    do {
+        pthread_mutex_lock(data->socket_mutex);
+        int ret = send(data->socket,
+                       data->event.description,
+                       description_length + 1, 0);
 
-    time_t last = event_list_node_value(current)->repeat_after;
-    current = event_list_node_next(current);
+        if (ret < 0)
+            FATAL("send: %s", strerror(errno));
+        pthread_mutex_unlock(data->socket_mutex);
 
-    while (event_list_node_has_value(current)) {
-        event_t* event = event_list_node_value(current);
-        if (event->repeat_after < last)
-            return false;
+        // TODO: Sleep is not super-accurate, but it's probably close enough for
+        // this, and I don't think we're expected to do something more
+        // sophisticated.
+        sleep(data->event.repeat_after);
+        current_time = time(NULL);
+    } while (!data->event.repeat_during ||
+             current_time - initial < data->event.repeat_during);
 
-        last = event->repeat_after;
-        current = event_list_node_next(current);
-    }
-
-    return true;
+    return NULL;
 }
 
-int run_event_loop(event_list_t* list) {
-    assert(list);
-    assert(list_is_ordered(list));
+/**
+ * This function creates a thread per event and dispatchs it.
+ *
+ * This is **extremely** inefficient, I know, but it was a requisite stated in
+ * the statement of the practice.
+ *
+ * The ideal way (and that's why the whole event_list exists, to allow fast
+ * insertion/deletion) would be to keep a list of events sorted by when should
+ * they be dispatched, and just dispatch them in order and sleep until we have
+ * to dispatch the next.
+ *
+ * I possibly make that strategy gated by an #ifdef, but I don't have a lot of
+ * time so...
+ */
+int create_dispatchers(int socket, event_list_t* list) {
+    if (event_list_is_empty(list))
+        return 0;
+
+    pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    pthread_t* threads = malloc(sizeof(pthread_t) * event_list_size(list));
+
+    size_t length = event_list_size(list);
+    size_t index = 0;
 
     event_list_node_t* current = event_list_head(list);
     while (event_list_node_has_value(current)) {
+        dispatcher_data_t* data = malloc(sizeof(dispatcher_data_t));
+        assert(data);
         event_t* event = event_list_node_value(current);
-        printf("%s: %ld %ld\n", event->description, event->repeat_during,
-                event->repeat_after);
 
+        data->socket = socket;
+        data->event = *event;
+        data->socket_mutex = &mutex;
+
+        int result = pthread_create(threads + index, NULL, event_dispatcher, data);
+        if (result != 0)
+            FATAL("Unable to create thread to dispatch event: %s", event->description);
+
+        index++;
         current = event_list_node_next(current);
     }
 
-    // TODO: Dispatch the events.
+    assert(index == length);
+
+    for (size_t i = 0; i < length; ++i)
+        pthread_join(threads[i], NULL);
 
     return 0;
 }
 
+int create_multicast_sender(const char* ip_address, long port) {
+    // TODO
+    return -1;
+}
+
 int main(int argc, char** argv) {
     const char* events_src_filename = "etc/events.txt";
+    const char* ip_address = "ffx1:20";
     long port = 8000;
 
     LOGGER_CONFIG.log_file = stderr;
@@ -131,6 +180,12 @@ int main(int argc, char** argv) {
             if (i == argc)
                 FATAL("The %s option needs a value", argv[i - 1]);
             events_src_filename = argv[i];
+        } else if (strcmp(argv[i], "-a") == 0 ||
+                   strcmp(argv[i], "--address") == 0) {
+            ++i;
+            if (i == argc)
+                FATAL("The %s option needs a value", argv[i - 1]);
+            ip_address = argv[i];
         } else {
             WARN("Unhandled option: %s", argv[i]);
         }
@@ -142,5 +197,6 @@ int main(int argc, char** argv) {
     if (!parse_config_file(events_src_filename, &list))
         FATAL("Failed to parse config, aborting");
 
-    return run_event_loop(&list);
+    int socket = create_multicast_sender(ip_address, port);
+    return create_dispatchers(socket, &list);
 }
