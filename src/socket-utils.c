@@ -19,6 +19,9 @@
  */
 #include "socket-utils.h"
 
+#include <net/if.h>
+#include <string.h>
+
 #ifdef SOCK_UN
 int sockaddr_un_cmp(struct sockaddr_un* x, struct sockaddr_un* y) {
     return strcmp(x->sun_path, y->sun_path);
@@ -67,4 +70,81 @@ int sockaddr_cmp(struct sockaddr* x, struct sockaddr* y) {
             assert(0 && "Unknown sockaddr family");
     }
     return 0;
+}
+
+int create_multicast_sender(const char* ip_address,
+                            const char* port,
+                            const char* interface,
+                            int ttl,
+                            struct sockaddr* out_addr,
+                            socklen_t* out_len) {
+    struct addrinfo hints;
+    int sock = -1;
+    struct addrinfo* info = NULL;
+    int ret;
+
+    memset(&hints, 0, sizeof(hints));
+
+    // So this could also be used for IPv4
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_DGRAM;
+
+    ret = getaddrinfo(ip_address, port, &hints, &info);
+    if (ret != 0)
+        return ret;
+
+    *out_len = info->ai_addrlen;
+    memcpy(out_addr, info->ai_addr, info->ai_addrlen);
+
+    sock = socket(info->ai_family, info->ai_socktype, 0);
+    if (sock == -1)
+        return -1;
+
+    ret = setsockopt(sock,
+                     info->ai_family == AF_INET6 ? IPPROTO_IPV6
+                                                 : IPPROTO_IP,
+                     info->ai_family == AF_INET6 ? IPV6_MULTICAST_HOPS
+                                                 : IP_MULTICAST_TTL,
+                     &ttl,
+                     sizeof(ttl));
+    if (ret != 0)
+        goto errexit;
+
+    if (info->ai_family == AF_INET) {
+        in_addr_t iface = INADDR_ANY;
+
+        if (interface)
+        ret = setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, &iface, sizeof(in_addr_t));
+        if (ret != 0)
+            goto errexit;
+    } else {
+        assert(info->ai_family == AF_INET6);
+        unsigned int interface_index = 0; // zero is the default
+
+        if (interface) {
+            interface_index = if_nametoindex(interface);
+            if (!interface_index)
+                goto errexit;
+        }
+
+        ret = setsockopt(sock,
+                         IPPROTO_IPV6,
+                         IPV6_MULTICAST_IF,
+                         &interface_index,
+                         sizeof(interface_index));
+        if (ret != 0)
+            goto errexit;
+    }
+
+    assert(sock != -1);
+    return sock;
+
+errexit:
+    if (sock != -1)
+        close(sock);
+
+    if (info)
+        freeaddrinfo(info);
+
+    return -1;
 }

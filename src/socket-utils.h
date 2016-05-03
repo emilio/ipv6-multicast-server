@@ -24,6 +24,7 @@
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
 #include <unistd.h>
+#include <netdb.h>
 #include <assert.h>
 
 #define SOCKADDR_PTR(sa) ((struct sockaddr*)sa)
@@ -43,4 +44,11 @@ int sockaddr_in6_cmp(struct sockaddr_in6* x, struct sockaddr_in6* y);
 int sockaddr_in_cmp(struct sockaddr_in* x, struct sockaddr_in* y);
 
 int sockaddr_cmp(struct sockaddr* x, struct sockaddr* y);
+
+int create_multicast_sender(const char* ip_address,
+                            const char* port,
+                            const char* interface,
+                            int ttl,
+                            struct sockaddr* out_addr,
+                            socklen_t* out_len);
 #endif

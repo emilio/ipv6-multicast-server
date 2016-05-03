@@ -37,12 +37,15 @@
 
 #include "logger.h"
 #include "config.h"
+#include "socket-utils.h"
 
 void show_usage(int _argc, char** argv) {
     fprintf(stderr, "Usage: %s [options]\n", argv[0]);
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -h, --help\t Display this message and exit\n");
     fprintf(stderr, "  -a, --address [address]\t IPv6 address\n");
+    fprintf(stderr, "  -i, --interface [iface]\t network interface\n");
+    fprintf(stderr, "  --ttl [ttl] \t Time to live\n");
     fprintf(stderr, "  -p, --port [port]\t Listen to [port]\n");
     fprintf(stderr, "  -v, --verbose\t Be verbose about what is going on\n");
     fprintf(stderr, "  -l, --log [file]\t Log to [file]\n");
@@ -56,6 +59,8 @@ typedef struct dispatcher_data {
     int socket;
     event_t event;
     pthread_mutex_t* socket_mutex;
+    struct sockaddr* addr;
+    socklen_t addr_len;
 } dispatcher_data_t;
 
 void* event_dispatcher(void* arg) {
@@ -66,12 +71,19 @@ void* event_dispatcher(void* arg) {
     size_t description_length = strlen(data->event.description);
     do {
         pthread_mutex_lock(data->socket_mutex);
-        int ret = send(data->socket,
-                       data->event.description,
-                       description_length + 1, 0);
+        int ret = sendto(data->socket,
+                         data->event.description,
+                         description_length + 1, 0,
+                         data->addr,
+                         data->addr_len);
 
         if (ret < 0)
             FATAL("send: %s", strerror(errno));
+
+        LOG("dispatch: %s (%ld, %ld)", data->event.description,
+                                       data->event.repeat_during,
+                                       data->event.repeat_after);
+
         pthread_mutex_unlock(data->socket_mutex);
 
         // TODO: Sleep is not super-accurate, but it's probably close enough for
@@ -99,7 +111,10 @@ void* event_dispatcher(void* arg) {
  * I possibly make that strategy gated by an #ifdef, but I don't have a lot of
  * time so...
  */
-int create_dispatchers(int socket, event_list_t* list) {
+int create_dispatchers(int socket,
+                       event_list_t* list,
+                       struct sockaddr* addr,
+                       socklen_t len) {
     if (event_list_is_empty(list))
         return 0;
 
@@ -118,6 +133,8 @@ int create_dispatchers(int socket, event_list_t* list) {
         data->socket = socket;
         data->event = *event;
         data->socket_mutex = &mutex;
+        data->addr = addr;
+        data->addr_len = len;
 
         int result = pthread_create(threads + index, NULL, event_dispatcher, data);
         if (result != 0)
@@ -135,15 +152,12 @@ int create_dispatchers(int socket, event_list_t* list) {
     return 0;
 }
 
-int create_multicast_sender(const char* ip_address, long port) {
-    // TODO
-    return -1;
-}
-
 int main(int argc, char** argv) {
     const char* events_src_filename = "etc/events.txt";
-    const char* ip_address = "ffx1:20";
-    long port = 8000;
+    const char* ip_address = "ff02:0:0:0:0:0:0:f";
+    const char* interface = NULL;
+    const char* port = "8000";
+    int ttl;
 
     LOGGER_CONFIG.log_file = stderr;
 
@@ -171,9 +185,7 @@ int main(int argc, char** argv) {
             ++i;
             if (i == argc)
                 FATAL("The %s option needs a value", argv[i - 1]);
-            const char* cursor = argv[i];
-            if (!read_long(&cursor, &port))
-                WARN("Using default port %ld", port);
+            port = argv[i];
         } else if (strcmp(argv[i], "-f") == 0 ||
                    strcmp(argv[i], "--file") == 0) {
             ++i;
@@ -186,6 +198,17 @@ int main(int argc, char** argv) {
             if (i == argc)
                 FATAL("The %s option needs a value", argv[i - 1]);
             ip_address = argv[i];
+        } else if (strcmp(argv[i], "-i") == 0 ||
+                   strcmp(argv[i], "--interface") == 0) {
+            ++i;
+            if (i == argc)
+                FATAL("The %s option needs a value", argv[i - 1]);
+            interface = argv[i];
+        } else if (strcmp(argv[i], "--ttl") == 0) {
+            ++i;
+            if (i == argc || argv[i][0] < '0' || argv[i][0] > '9')
+                FATAL("The %s option needs a numeric value", argv[i - 1]);
+            ttl = atoi(argv[i]);
         } else {
             WARN("Unhandled option: %s", argv[i]);
         }
@@ -197,6 +220,15 @@ int main(int argc, char** argv) {
     if (!parse_config_file(events_src_filename, &list))
         FATAL("Failed to parse config, aborting");
 
-    int socket = create_multicast_sender(ip_address, port);
-    return create_dispatchers(socket, &list);
+    struct sockaddr addr;
+    socklen_t len;
+    int socket = create_multicast_sender(ip_address, port,
+                                         interface, ttl,
+                                         &addr, &len);
+    if (socket < 0)
+        FATAL("Error creating sender(%d): %s, gai: %s", socket,
+                                                        strerror(errno),
+                                                        gai_strerror(socket));
+
+    return create_dispatchers(socket, &list, &addr, len);
 }
