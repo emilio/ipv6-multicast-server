@@ -226,9 +226,9 @@ int main(int argc, char** argv) {
                                          interface, ttl,
                                          &addr, &len);
     if (socket < 0)
-        FATAL("Error creating sender(%d): %s, gai: %s", socket,
-                                                        strerror(errno),
-                                                        gai_strerror(socket));
+        FATAL("Error creating sender (%d, %d): %s", socket, errno,
+                                                    errno ? strerror(errno)
+                                                          : gai_strerror(socket));
 
     return create_dispatchers(socket, &list, &addr, len);
 }

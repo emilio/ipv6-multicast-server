@@ -20,7 +20,10 @@
 #include "socket-utils.h"
 
 #include <net/if.h>
+#include <stdbool.h>
 #include <string.h>
+#include <ifaddrs.h>
+#include <errno.h>
 
 #ifdef SOCK_UN
 int sockaddr_un_cmp(struct sockaddr_un* x, struct sockaddr_un* y) {
@@ -81,6 +84,7 @@ int create_multicast_sender(const char* ip_address,
     struct addrinfo hints;
     int sock = -1;
     struct addrinfo* info = NULL;
+    struct ifaddrs* ipv4_ifs = NULL;
     int ret;
 
     memset(&hints, 0, sizeof(hints));
@@ -110,22 +114,43 @@ int create_multicast_sender(const char* ip_address,
     if (ret != 0)
         goto errexit;
 
-    if (info->ai_family == AF_INET) {
-        in_addr_t iface = INADDR_ANY;
-
-        if (interface)
-        ret = setsockopt(sock, IPPROTO_IP, IP_MULTICAST_IF, &iface, sizeof(in_addr_t));
+    if (info->ai_family == AF_INET && interface) {
+        ret = getifaddrs(&ipv4_ifs);
         if (ret != 0)
             goto errexit;
-    } else {
-        assert(info->ai_family == AF_INET6);
-        unsigned int interface_index = 0; // zero is the default
 
-        if (interface) {
-            interface_index = if_nametoindex(interface);
-            if (!interface_index)
-                goto errexit;
+        struct ifaddrs* current = ipv4_ifs;
+        bool found = false;
+        for (; current; current = current->ifa_next) {
+            if (current->ifa_addr->sa_family != AF_INET)
+                continue;
+
+            if (strcmp(current->ifa_name, interface) != 0)
+                continue;
+
+
+            struct sockaddr_in* addr = (struct sockaddr_in*)current->ifa_addr;
+
+            ret = setsockopt(sock,
+                             IPPROTO_IP,
+                             IP_MULTICAST_IF,
+                             &addr->sin_addr,
+                             sizeof(struct in_addr));
+            if (ret == 0) {
+                found = true;
+                break;
+            }
         }
+
+        if (!found) {
+            if (!errno)
+                errno = EINVAL;
+            goto errexit;
+        }
+    } else if (info->ai_family == AF_INET6 && interface) {
+        unsigned int interface_index = if_nametoindex(interface);
+        if (!interface_index)
+            goto errexit;
 
         ret = setsockopt(sock,
                          IPPROTO_IPV6,
@@ -136,6 +161,10 @@ int create_multicast_sender(const char* ip_address,
             goto errexit;
     }
 
+    freeaddrinfo(info);
+    if (ipv4_ifs)
+        freeifaddrs(ipv4_ifs);
+
     assert(sock != -1);
     return sock;
 
@@ -145,6 +174,9 @@ errexit:
 
     if (info)
         freeaddrinfo(info);
+
+    if (ipv4_ifs)
+        freeifaddrs(ipv4_ifs);
 
     return -1;
 }
