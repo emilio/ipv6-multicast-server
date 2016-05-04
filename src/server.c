@@ -22,19 +22,11 @@
 #include <stdbool.h>
 #include <string.h>
 #include <errno.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <sys/wait.h>
 #include <signal.h>
-#include <netinet/in.h>
-#include <netinet/udp.h>
-#include <netinet/tcp.h>
 #include <netdb.h>
 #include <unistd.h>
-#include <poll.h>
-#include <fcntl.h>
 #include <assert.h>
+#include <pthread.h>
 
 #include "logger.h"
 #include "config.h"
