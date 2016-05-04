@@ -21,6 +21,7 @@
 
 #include <net/if.h>
 #include <stdbool.h>
+#include <stdlib.h>
 #include <string.h>
 #include <ifaddrs.h>
 #include <errno.h>
@@ -79,7 +80,7 @@ int create_multicast_sender(const char* ip_address,
                             const char* port,
                             const char* interface,
                             int ttl,
-                            struct sockaddr* out_addr,
+                            struct sockaddr** out_addr,
                             socklen_t* out_len) {
     struct addrinfo hints;
     int sock = -1;
@@ -98,7 +99,9 @@ int create_multicast_sender(const char* ip_address,
         return ret;
 
     *out_len = info->ai_addrlen;
-    memcpy(out_addr, info->ai_addr, info->ai_addrlen);
+    *out_addr = malloc(info->ai_addrlen);
+    assert(*out_addr);
+    memcpy(*out_addr, info->ai_addr, info->ai_addrlen);
 
     sock = socket(info->ai_family, info->ai_socktype, 0);
     if (sock == -1)

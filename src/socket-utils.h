@@ -49,6 +49,6 @@ int create_multicast_sender(const char* ip_address,
                             const char* port,
                             const char* interface,
                             int ttl,
-                            struct sockaddr* out_addr,
+                            struct sockaddr** out_addr,
                             socklen_t* out_len);
 #endif

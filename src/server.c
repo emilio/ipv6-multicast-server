@@ -55,6 +55,95 @@ void show_usage(int _argc, char** argv) {
     fprintf(stderr, "  Emilio Cobos Álvarez (<emiliocobos@usal.es>)\n");
 }
 
+typedef enum daemon_action {
+    DAEMON_ACTION_REBUILD,
+    DAEMON_ACTION_CONTINUE,
+    DAEMON_ACTION_EXIT,
+} daemon_action_t;
+
+const int HANDLED_SIGNALS[] = { SIGINT, SIGHUP, SIGALRM, SIGTERM };
+#define HANDLED_SIGNALS_COUNT (sizeof(HANDLED_SIGNALS) / sizeof(*HANDLED_SIGNALS))
+
+void setup_signal_handlers() {
+    sigset_t set;
+    sigemptyset(&set);
+
+    for (size_t i = 0; i < HANDLED_SIGNALS_COUNT; ++i)
+        sigaddset(&set, HANDLED_SIGNALS[i]);
+
+    int ret = sigprocmask(SIG_BLOCK, &set, NULL);
+    assert(ret == 0);
+}
+
+void cancel_all_threads(pthread_t* threads,
+                        bool* thread_statuses,
+                        size_t length) {
+    void* ret;
+    for (size_t i = 0; i < length; ++i) {
+        if (!thread_statuses[i])
+            continue;
+
+        if (pthread_kill(threads[i], 0) == 0) {
+            LOG("Running thread %zu, cancelling", i);
+            pthread_cancel(threads[i]);
+        }
+        pthread_join(threads[i], &ret);
+        LOG("Joined thread %zu, canceled: %s",
+                i, ret == PTHREAD_CANCELED ? "yes" : "no");
+        thread_statuses[i] = false;
+    }
+}
+
+daemon_action_t wait_and_cleanup(event_list_t* list,
+                                 pthread_t* threads,
+                                 bool* thread_statuses) {
+    sigset_t set;
+    sigemptyset(&set);
+
+    for (size_t i = 0; i < HANDLED_SIGNALS_COUNT; ++i)
+        sigaddset(&set, HANDLED_SIGNALS[i]);
+
+    // 1 second timeout for cleaning up.
+    //
+    // TODO: This shouldn't (but could) interfere with sleep() calls in other
+    // threads. After a few runs it seems it doesn't, but it could in other
+    // systems perhaps? Be sure about it.
+    alarm(1);
+    int sig;
+    int ret = sigwait(&set, &sig);
+    assert(ret == 0);
+
+    size_t length = event_list_size(list);
+    size_t i;
+    switch (sig) {
+        case SIGINT:
+        case SIGTERM:
+            WARN("Got interrupt signal, exiting...");
+            cancel_all_threads(threads, thread_statuses, length);
+            return DAEMON_ACTION_EXIT;
+        case SIGALRM:
+            LOG("Alarm, cleaning up possibly exited threads");
+            for (i = 0; i < length; ++i) {
+                if (!thread_statuses[i])
+                    continue;
+
+                if (pthread_kill(threads[i], 0) != 0) {
+                    LOG("Cleaning up exiting thread %zu", i);
+                    pthread_join(threads[i], NULL);
+                    thread_statuses[i] = false;
+                }
+            }
+
+            return DAEMON_ACTION_CONTINUE;
+        case SIGHUP:
+            LOG("Got hangup signal, trying to rebuild configuration...");
+            cancel_all_threads(threads, thread_statuses, length);
+            return DAEMON_ACTION_REBUILD;
+        default:
+            assert(!"Invalid signal caught?");
+    }
+}
+
 typedef struct dispatcher_data {
     int socket;
     event_t event;
@@ -64,35 +153,53 @@ typedef struct dispatcher_data {
 } dispatcher_data_t;
 
 void* event_dispatcher(void* arg) {
-    dispatcher_data_t* data = (dispatcher_data_t*) arg;
+    // Copy into the stack our heap data to free it and prevent the leak if this
+    // thread is cancelled.
+    //
+    // NOTE: Is important that this function NEVER explicitely allocates,
+    // in order for it to be killed safely from the outside without leaking.
+    dispatcher_data_t* heap_data = (dispatcher_data_t*) arg;
+    dispatcher_data_t data = *heap_data;
+    free(heap_data);
+
+
     time_t initial = time(NULL);
     time_t current_time;
 
-    size_t description_length = strlen(data->event.description);
+    size_t description_length = strlen(data.event.description);
+
+    // NB: We have to call pthread_setcancelstate(DISABLE) before the lock and
+    // ENABLE afterwards, because `sendto()` is required to be a cancellation
+    // point[1], so we could leave the mutex in a bad state (don't know how
+    // pthread handles this internally, but better be safe than sorry).
+    //
+    // [1]: http://man7.org/linux/man-pages/man7/pthreads.7.html
     do {
-        pthread_mutex_lock(data->socket_mutex);
-        int ret = sendto(data->socket,
-                         data->event.description,
+        pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
+        pthread_mutex_lock(data.socket_mutex);
+        int ret = sendto(data.socket,
+                         data.event.description,
                          description_length + 1, 0,
-                         data->addr,
-                         data->addr_len);
+                         data.addr,
+                         data.addr_len);
+        pthread_mutex_unlock(data.socket_mutex);
+        pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
         if (ret < 0)
             FATAL("send: %s", strerror(errno));
 
-        LOG("dispatch: %s (%ld, %ld)", data->event.description,
-                                       data->event.repeat_during,
-                                       data->event.repeat_after);
+        LOG("dispatch: %s (%ld, %ld)", data.event.description,
+                                       data.event.repeat_during,
+                                       data.event.repeat_after);
 
-        pthread_mutex_unlock(data->socket_mutex);
 
         // TODO: Sleep is not super-accurate, but it's probably close enough for
         // this, and I don't think we're expected to do something more
         // sophisticated.
-        sleep(data->event.repeat_after);
+        sleep(data.event.repeat_after);
         current_time = time(NULL);
-    } while (!data->event.repeat_during ||
-             current_time - initial < data->event.repeat_during);
+    } while (!data.event.repeat_during ||
+             current_time - initial < data.event.repeat_during);
 
     return NULL;
 }
@@ -112,48 +219,82 @@ void* event_dispatcher(void* arg) {
  * time so...
  */
 int create_dispatchers(int socket,
-                       event_list_t* list,
+                       const char* events_src_filename,
                        struct sockaddr* addr,
                        socklen_t len) {
-    if (event_list_is_empty(list))
-        return 0;
-
     pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-    pthread_t* threads = malloc(sizeof(pthread_t) * event_list_size(list));
 
-    size_t length = event_list_size(list);
-    size_t index = 0;
+    event_list_t list = EVENT_LIST_INITIALIZER;
+    pthread_t* threads = NULL;
+    bool* statuses = NULL;
+    daemon_action_t next_action = DAEMON_ACTION_REBUILD;
 
-    event_list_node_t* current = event_list_head(list);
-    while (event_list_node_has_value(current)) {
-        dispatcher_data_t* data = malloc(sizeof(dispatcher_data_t));
-        assert(data);
-        event_t* event = event_list_node_value(current);
+    while (next_action != DAEMON_ACTION_EXIT) {
+        if (next_action == DAEMON_ACTION_REBUILD) {
 
-        data->socket = socket;
-        data->event = *event;
-        data->socket_mutex = &mutex;
-        data->addr = addr;
-        data->addr_len = len;
+            // Only freeing the heap memory, the cleanup function takes care of
+            // terminating them.
+            if (threads)
+                free(threads);
 
-        int result = pthread_create(threads + index, NULL, event_dispatcher, data);
-        if (result != 0)
-            FATAL("Unable to create thread to dispatch event: %s", event->description);
+            if (statuses)
+                free(statuses);
 
-        index++;
-        current = event_list_node_next(current);
+            event_list_destroy(&list);
+
+            if (!parse_config_file(events_src_filename, &list))
+                WARN("Failed to parse config file, continuing with empty list");
+
+            if (event_list_is_empty(&list)) {
+                threads = NULL;
+                statuses = NULL;
+            } else {
+                threads = malloc(sizeof(pthread_t) * event_list_size(&list));
+                statuses = malloc(sizeof(bool) * event_list_size(&list));
+                assert(threads);
+                assert(statuses);
+            }
+
+            size_t length = event_list_size(&list);
+            size_t index = 0;
+
+            event_list_node_t* current = event_list_head(&list);
+            while (event_list_node_has_value(current)) {
+                dispatcher_data_t* data = malloc(sizeof(dispatcher_data_t));
+                assert(data);
+                event_t* event = event_list_node_value(current);
+
+                data->socket = socket;
+                data->event = *event;
+                data->socket_mutex = &mutex;
+                data->addr = addr;
+                data->addr_len = len;
+
+                statuses[index] = true;
+                int result = pthread_create(threads + index, NULL, event_dispatcher, data);
+                if (result != 0)
+                    FATAL("Unable to create thread to dispatch event: %s", event->description);
+
+                index++;
+                current = event_list_node_next(current);
+            }
+
+            assert(index == length);
+        } // DAEMON_ACTION_REBUILD
+
+        next_action = wait_and_cleanup(&list, threads, statuses);
     }
 
-    assert(index == length);
+    LOG("Terminating");
+    close(socket);
 
-    // TODO: Instead of joining here, we should catch SIG{INT,HUP}, inhibiting
-    // them first with sigprocmask, and probably sleeping a bit (with SIGALARM)
-    // to check if threads are already finished (and clean up then).
-    //
-    // In case we receive a signal we should either exit cleanly (SIGINT) or
-    // reload the configuration (SIGHUP).
-    for (size_t i = 0; i < length; ++i)
-        pthread_join(threads[i], NULL);
+    event_list_destroy(&list);
+
+    if (threads)
+        free(threads);
+
+    if (statuses)
+        free(statuses);
 
     return 0;
 }
@@ -163,7 +304,7 @@ int main(int argc, char** argv) {
     const char* ip_address = "ff02:0:0:0:0:0:0:f";
     const char* interface = NULL;
     const char* port = "8000";
-    int ttl;
+    int ttl = 1;
 
     LOGGER_CONFIG.log_file = stderr;
 
@@ -221,12 +362,10 @@ int main(int argc, char** argv) {
     }
 
     LOG("events: %s", events_src_filename);
-    event_list_t list = EVENT_LIST_INITIALIZER;
 
-    if (!parse_config_file(events_src_filename, &list))
-        FATAL("Failed to parse config, aborting");
+    setup_signal_handlers();
 
-    struct sockaddr addr;
+    struct sockaddr* addr;
     socklen_t len;
     int socket = create_multicast_sender(ip_address, port,
                                          interface, ttl,
@@ -236,5 +375,8 @@ int main(int argc, char** argv) {
                                                     errno ? strerror(errno)
                                                           : gai_strerror(socket));
 
-    return create_dispatchers(socket, &list, &addr, len);
+    int ret = create_dispatchers(socket, events_src_filename, addr, len);
+
+    free(addr);
+    return ret;
 }
