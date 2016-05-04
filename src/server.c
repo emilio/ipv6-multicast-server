@@ -377,6 +377,9 @@ int main(int argc, char** argv) {
 
     int ret = create_dispatchers(socket, events_src_filename, addr, len);
 
+    if (LOGGER_CONFIG.log_file)
+        fclose(LOGGER_CONFIG.log_file);
+
     free(addr);
     return ret;
 }

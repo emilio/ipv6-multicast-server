@@ -82,13 +82,15 @@ int create_multicast_sender(const char* ip_address,
                             int ttl,
                             struct sockaddr** out_addr,
                             socklen_t* out_len) {
-    struct addrinfo hints;
     int sock = -1;
     struct addrinfo* info = NULL;
     struct ifaddrs* ipv4_ifs = NULL;
     int ret;
 
+    struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
+
+    *out_addr = NULL;
 
     // So this could also be used for IPv4
     hints.ai_family = AF_UNSPEC;
@@ -174,6 +176,9 @@ int create_multicast_sender(const char* ip_address,
 errexit:
     if (sock != -1)
         close(sock);
+
+    if (*out_addr)
+        free(*out_addr);
 
     if (info)
         freeaddrinfo(info);
