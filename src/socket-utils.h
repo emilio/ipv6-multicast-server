@@ -20,17 +20,10 @@
 #ifndef SOCKET_UTILS_H
 #define SOCKET_UTILS_H
 #include <arpa/inet.h>
-#include <netinet/in.h>
-#include <netinet/udp.h>
-#include <netinet/tcp.h>
-#include <unistd.h>
-#include <netdb.h>
-#include <assert.h>
 
 #define SOCKADDR_PTR(sa) ((struct sockaddr*)sa)
 
 #ifdef SOCK_UN
-#include <sys/un.h>
 #define SOCKADDR_UN_PTR(sa) ((struct sockaddr_un*)sa)
 int sockaddr_un_cmp(struct sockaddr_un* x, struct sockaddr_un* y);
 #endif
@@ -51,4 +44,10 @@ int create_multicast_sender(const char* ip_address,
                             int ttl,
                             struct sockaddr** out_addr,
                             socklen_t* out_len);
+
+int create_multicast_receiver(const char* ip_address,
+                              const char* port,
+                              const char* interface,
+                              struct sockaddr** out_addr,
+                              socklen_t* out_len);
 #endif

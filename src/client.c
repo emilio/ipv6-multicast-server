@@ -49,6 +49,7 @@
 #include <netinet/in.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <poll.h>
 #include <fcntl.h>
@@ -73,6 +74,21 @@ void show_usage(int _argc, char** argv) {
     fprintf(stderr, "  Emilio Cobos Álvarez (<emiliocobos@usal.es>)\n");
 }
 
+void handle_interrupt(int sig) {
+    exit(0);
+}
+
+int SOCKET = -1; // Yeah, global state ftw :/
+
+void cleanly_dealloc_resources() {
+    if (LOGGER_CONFIG.log_file)
+        fclose(LOGGER_CONFIG.log_file);
+    LOGGER_CONFIG.log_file = NULL;
+
+    if (SOCKET != -1)
+        close(SOCKET);
+    SOCKET = -1;
+}
 
 int main(int argc, char** argv) {
     const char* ip_address = "ff02:0:0:0:0:0:0:f";
@@ -80,6 +96,11 @@ int main(int argc, char** argv) {
     const char* port = "8000";
 
     LOGGER_CONFIG.log_file = stderr;
+
+    atexit(cleanly_dealloc_resources);
+
+    signal(SIGINT, handle_interrupt);
+    signal(SIGTERM, handle_interrupt);
 
     for(int i  = 1; i < argc; ++i) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -125,9 +146,32 @@ int main(int argc, char** argv) {
 
     LOG("Using iface: %s, port: %s, address: %s", interface, port, ip_address);
 
+    struct sockaddr* addr = NULL;
+    socklen_t len = 0;
+    SOCKET = create_multicast_receiver(ip_address, port, interface, &addr, &len);
+    if (addr)
+        free(addr); // we don't care about it
 
-    if (LOGGER_CONFIG.log_file)
-        fclose(LOGGER_CONFIG.log_file);
+    if (SOCKET < 0)
+        FATAL("Error creating receiver (%d, %d): %s", SOCKET, errno,
+                                                      errno ? strerror(errno)
+                                                            : gai_strerror(SOCKET));
+
+    char buffer[512];
+    while (true) {
+        ssize_t ret = recvfrom(SOCKET, buffer, sizeof(buffer), 0, NULL, NULL);
+        if (ret < 0) {
+            WARN("read error: %s", strerror(errno));
+        } else {
+            if (ret < sizeof(buffer))
+                buffer[ret] = '\0';
+            else
+                buffer[sizeof(buffer) - 1] = '\0';
+            printf("> %s\n", buffer);
+        }
+    }
+
+    assert(!"Unreachable");
 
     return 0;
 }

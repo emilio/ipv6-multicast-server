@@ -16,7 +16,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-CFLAGS := -std=c99 -Wall -pedantic -D_REENTRANT -D__USE_XOPEN -D_XOPEN_SOURCE=600
+CFLAGS := -std=c99 -Wall -pedantic -D_GNU_SOURCE
 CLINKFLAGS := -pthread
 UNAME := $(shell uname)
 

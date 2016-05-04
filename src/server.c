@@ -30,6 +30,7 @@
 #include <netinet/in.h>
 #include <netinet/udp.h>
 #include <netinet/tcp.h>
+#include <netdb.h>
 #include <unistd.h>
 #include <poll.h>
 #include <fcntl.h>
@@ -362,6 +363,7 @@ int main(int argc, char** argv) {
     }
 
     LOG("events: %s", events_src_filename);
+    LOG("iface: %s, ip: %s, port: %s", interface, ip_address, port);
 
     setup_signal_handlers();
 
