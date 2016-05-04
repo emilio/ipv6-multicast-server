@@ -146,6 +146,12 @@ int create_dispatchers(int socket,
 
     assert(index == length);
 
+    // TODO: Instead of joining here, we should catch SIG{INT,HUP}, inhibiting
+    // them first with sigprocmask, and probably sleeping a bit (with SIGALARM)
+    // to check if threads are already finished (and clean up then).
+    //
+    // In case we receive a signal we should either exit cleanly (SIGINT) or
+    // reload the configuration (SIGHUP).
     for (size_t i = 0; i < length; ++i)
         pthread_join(threads[i], NULL);
 
