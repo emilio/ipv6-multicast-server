@@ -108,5 +108,7 @@ bool parse_config_file(const char* filename, event_list_t* out_list) {
         event_list_push_ordered(out_list, &event);
     }
 
+    fclose(f);
+
     return true;
 }
