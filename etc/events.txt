@@ -3,3 +3,5 @@
 10 0 abc
 100 0 abc
 4 0 abc
+# This one should be cancelled after a few seconds
+4 8 abc
