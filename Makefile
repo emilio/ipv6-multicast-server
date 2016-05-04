@@ -63,6 +63,11 @@ release: CFLAGS := $(CFLAGS) -O2
 release: clean-binaries binaries
 	@echo > /dev/null
 
+.PHONY: debug
+debug: CFLAGS := $(CFLAGS) -g
+debug: clean-binaries binaries
+	@echo > /dev/null
+
 .PHONY: test
 test: CFLAGS := $(CFLAGS) -g
 test: target/tests/tests
