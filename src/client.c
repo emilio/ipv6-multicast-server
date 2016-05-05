@@ -62,7 +62,7 @@ void cleanly_dealloc_resources() {
 }
 
 int main(int argc, char** argv) {
-    const char* ip_address = "ff02:0:0:0:0:0:0:f";
+    const char* ip_address = "ff02:0:0:0:2:3:2:4";
     const char* interface = NULL;
     const char* port = "8000";
 

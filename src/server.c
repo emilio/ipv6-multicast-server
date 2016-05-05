@@ -294,7 +294,7 @@ int create_dispatchers(int socket,
 
 int main(int argc, char** argv) {
     const char* events_src_filename = "etc/events.txt";
-    const char* ip_address = "ff02:0:0:0:0:0:0:f";
+    const char* ip_address = "ff02:0:0:0:2:3:2:4";
     const char* interface = NULL;
     const char* port = "8000";
     int ttl = 1;

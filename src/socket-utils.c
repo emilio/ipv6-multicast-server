@@ -249,7 +249,6 @@ int create_multicast_receiver(const char* ip_address,
         goto errexit;
 
     ret = bind(sock, local_address->ai_addr, local_address->ai_addrlen);
-
     if (ret != 0)
         goto errexit;
 
