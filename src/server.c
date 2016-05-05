@@ -27,6 +27,7 @@
 #include <unistd.h>
 #include <assert.h>
 #include <pthread.h>
+#include <sys/wait.h>
 
 #include "logger.h"
 #include "config.h"
@@ -39,6 +40,7 @@ void show_usage(int _argc, char** argv) {
     fprintf(stderr, "  -a, --address [address]\t IPv6 address\n");
     fprintf(stderr, "  -i, --interface [iface]\t network interface\n");
     fprintf(stderr, "  --ttl [ttl] \t Time to live\n");
+    fprintf(stderr, "  -d, --daemonize \t Make the process a daemon\n");
     fprintf(stderr, "  -p, --port [port]\t Listen to [port]\n");
     fprintf(stderr, "  -v, --verbose\t Be verbose about what is going on\n");
     fprintf(stderr, "  -l, --log [file]\t Log to [file]\n");
@@ -56,6 +58,16 @@ typedef enum daemon_action {
 
 const int HANDLED_SIGNALS[] = { SIGINT, SIGHUP, SIGALRM, SIGTERM };
 #define HANDLED_SIGNALS_COUNT (sizeof(HANDLED_SIGNALS) / sizeof(*HANDLED_SIGNALS))
+
+void daemonize_sig_handler(int signal) {
+    switch (signal) {
+        case SIGCHLD: // The daemon died
+            FATAL("Daemon has died on startup");
+        case SIGALRM:
+            LOG("Daemon timed out waiting for children, they're probably fine");
+            exit(0);
+    }
+}
 
 void setup_signal_handlers() {
     sigset_t set;
@@ -298,6 +310,7 @@ int main(int argc, char** argv) {
     const char* interface = NULL;
     const char* port = "8000";
     int ttl = 1;
+    bool daemonize = false;
 
     LOGGER_CONFIG.log_file = stderr;
 
@@ -338,6 +351,9 @@ int main(int argc, char** argv) {
             if (i == argc)
                 FATAL("The %s option needs a value", argv[i - 1]);
             ip_address = argv[i];
+        } else if (strcmp(argv[i], "-d") == 0 ||
+                   strcmp(argv[i], "--daemonize") == 0) {
+            daemonize = true;
         } else if (strcmp(argv[i], "-i") == 0 ||
                    strcmp(argv[i], "--interface") == 0) {
             ++i;
@@ -355,9 +371,46 @@ int main(int argc, char** argv) {
     }
 
     LOG("events: %s", events_src_filename);
-    LOG("iface: %s, ip: %s, port: %s", interface, ip_address, port);
+    LOG("iface: %s, ip: %s, port: %s daemonize: %s",
+        interface, ip_address, port, daemonize ? "y" : "n");
 
-    setup_signal_handlers();
+    if (daemonize) {
+        if (signal(SIGCHLD, daemonize_sig_handler) == SIG_ERR)
+            FATAL("Error registering SIGCHLD: %s", strerror(errno));
+
+        if (signal(SIGALRM, daemonize_sig_handler) == SIG_ERR)
+            FATAL("Error registering SIGALRM: %s", strerror(errno));
+
+        pid_t child_pid;
+        switch ((child_pid = fork())) {
+        case 0:
+            if (signal(SIGALRM, SIG_IGN) == SIG_ERR)
+                FATAL("Error ignoring SIGHUP: %s", strerror(errno));
+
+            if (signal(SIGCHLD, SIG_IGN) == SIG_ERR)
+                FATAL("Error ignoring SIGCHLD: %s", strerror(errno));
+
+            setup_signal_handlers();
+            break;
+        case -1:
+            FATAL("Fork error: %s", strerror(errno));
+            break;
+        default:
+            // NOTE: this is an educated guess, and does not guarantee
+            // that the server is fine. We assume that if after two seconds
+            // it's fine, it will be fine forever, but this does not have to
+            // be true.
+            alarm(2);
+            waitpid(child_pid, NULL, 0); // Either SIGCHLD (if the daemon
+                                         // dies) or SIGALRM will arrive
+            return 0;
+        }
+
+    } else {
+        // If we don't want to make this a daemon, we setup the normal signal
+        // handlers and we're done.
+        setup_signal_handlers();
+    }
 
     struct sockaddr* addr;
     socklen_t len;
