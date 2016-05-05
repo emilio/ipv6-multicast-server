@@ -78,8 +78,8 @@ run: run/launch-server.sh
 	@$<
 
 .PHONY: docs
-docs: $(DOC_TARGETS)
-	@echo > /dev/null
+docs:
+	@make -C docs
 
 .PHONY: all
 all: binaries test docs
@@ -150,9 +150,3 @@ target/tests/tests: $(TEST_OBJECTS) $(COMMON_OBJS)
 	@mkdir -p $(dir $@)
 	$(info [cc] $@)
 	@$(CC) $(CFLAGS) $^ -o $@
-
-# Docs
-%.pdf: %.md
-	$(info [doc] $< -> $@)
-	@pandoc $(PANDOC_FLAGS) --from=markdown --latex-engine=xelatex --to=latex $< -o $@
-
