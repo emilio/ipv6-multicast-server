@@ -295,12 +295,6 @@ int create_multicast_receiver(const char* ip_address,
                 goto errexit;
             }
         } else {
-            struct sockaddr_in to_bind;
-            memset(&to_bind, 0, sizeof(struct sockaddr_in));
-            to_bind.sin_family = AF_INET;
-            to_bind.sin_port = htons(atoi(port));
-            to_bind.sin_addr.s_addr = INADDR_ANY;
-
             ret = setsockopt(sock, IPPROTO_IP, IP_ADD_MEMBERSHIP, &request, sizeof(request));
             if (ret != 0)
                 goto errexit;
