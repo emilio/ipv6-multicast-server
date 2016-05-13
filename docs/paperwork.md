@@ -35,7 +35,8 @@ Donde `<r>` es la velocidad de repetición, `<d>` es el tiempo durante el cual s
 repetirá, y `<desc>` es la descripción del evento.
 
 Se ha escogido este formato porque a ojos del autor es mucho más fácil de leer,
-y no impone ningún separador que pudiera entrar en conflicto con la descripción.
+es consistente con otros programas del entorno UNIX como `cron`, y no impone
+ningún separador que pudiera entrar en conflicto con la descripción.
 
 Se ha creado un tipo de datos (`event_list_t`), que es una lista enlazada con
 eventos. La idea de este tipo de datos era no tener que crear un thread por
