@@ -45,6 +45,7 @@ void show_usage(int _argc, char** argv) {
     fprintf(stderr, "  -v, --verbose\t Be verbose about what is going on\n");
     fprintf(stderr, "  -l, --log [file]\t Log to [file]\n");
     fprintf(stderr, "  -f, --file [file]\t Use [file] as event data source\n");
+    fprintf(stderr, "  --disable-loopback \t Disable loopback\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Author(s):\n");
     fprintf(stderr, "  Emilio Cobos Álvarez (<emiliocobos@usal.es>)\n");
@@ -311,6 +312,7 @@ int main(int argc, char** argv) {
     const char* port = "8000";
     int ttl = 1;
     bool daemonize = false;
+    bool enable_loopback = true;
 
     LOGGER_CONFIG.log_file = stderr;
 
@@ -354,6 +356,8 @@ int main(int argc, char** argv) {
         } else if (strcmp(argv[i], "-d") == 0 ||
                    strcmp(argv[i], "--daemonize") == 0) {
             daemonize = true;
+        } else if (strcmp(argv[i], "--disable-loopback") == 0) {
+            enable_loopback = false;
         } else if (strcmp(argv[i], "-i") == 0 ||
                    strcmp(argv[i], "--interface") == 0) {
             ++i;
@@ -371,8 +375,9 @@ int main(int argc, char** argv) {
     }
 
     LOG("events: %s", events_src_filename);
-    LOG("iface: %s, ip: %s, port: %s daemonize: %s",
-        interface, ip_address, port, daemonize ? "y" : "n");
+    LOG("iface: %s, ip: %s, port: %s daemonize: %s, ttl: %d, loopback: %s",
+        interface, ip_address, port, daemonize ? "y" : "n", ttl,
+        enable_loopback ? "y" : "n");
 
     if (daemonize) {
         if (signal(SIGCHLD, daemonize_sig_handler) == SIG_ERR)
@@ -405,7 +410,6 @@ int main(int argc, char** argv) {
                                          // dies) or SIGALRM will arrive
             return 0;
         }
-
     } else {
         // If we don't want to make this a daemon, we setup the normal signal
         // handlers and we're done.
@@ -416,6 +420,7 @@ int main(int argc, char** argv) {
     socklen_t len;
     int socket = create_multicast_sender(ip_address, port,
                                          interface, ttl,
+                                         enable_loopback,
                                          &addr, &len);
     if (socket < 0)
         FATAL("Error creating sender (%d, %d): %s", socket, errno,

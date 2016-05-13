@@ -37,12 +37,14 @@ int create_multicast_sender(const char* ip_address,
                             const char* port,
                             const char* interface,
                             int ttl,
+                            bool enable_loopback,
                             struct sockaddr** out_addr,
                             socklen_t* out_len) {
     int sock = -1;
     struct addrinfo* info = NULL;
     struct ifaddrs* ipv4_ifs = NULL;
     int ret;
+    int loopback = (int)enable_loopback;
 
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
@@ -73,6 +75,16 @@ int create_multicast_sender(const char* ip_address,
                                                  : IP_MULTICAST_TTL,
                      &ttl,
                      sizeof(ttl));
+    if (ret != 0)
+        goto errexit;
+
+    ret = setsockopt(sock,
+                     info->ai_family == AF_INET6 ? IPPROTO_IPV6
+                                                 : IPPROTO_IP,
+                     info->ai_family == AF_INET6 ? IPV6_MULTICAST_LOOP
+                                                 : IP_MULTICAST_LOOP,
+                     &loopback,
+                     sizeof(loopback));
     if (ret != 0)
         goto errexit;
 
@@ -134,8 +146,10 @@ errexit:
     if (sock != -1)
         close(sock);
 
-    if (*out_addr)
+    if (*out_addr) {
         free(*out_addr);
+        *out_addr = NULL;
+    }
 
     if (info)
         freeaddrinfo(info);
@@ -201,7 +215,6 @@ int create_multicast_receiver(const char* ip_address,
     ret = bind(sock, local_address->ai_addr, local_address->ai_addrlen);
     if (ret != 0)
         goto errexit;
-
 
     // IPv4
     if (remote_address->ai_family  == AF_INET) {
@@ -289,8 +302,10 @@ errexit:
     if (sock != -1)
         close(sock);
 
-    if (*out_addr)
+    if (*out_addr) {
         free(*out_addr);
+        *out_addr = NULL;
+    }
 
     if (remote_address)
         freeaddrinfo(remote_address);

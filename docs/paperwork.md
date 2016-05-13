@@ -51,7 +51,7 @@ o usando la interfaz por defecto.
 
 # Capturas de tráfico del servidor
 
-## Nota previa acerca de las direcciones en las capturas
+## Nota previa acerca de las capturas
 
 Tras haber realizado las capturas, al ir a comprobar que la dirección multicast
 a la que se mandaban los paquetes de inclusión/exclusión era la correcta, me di
@@ -60,7 +60,7 @@ concretamente la dirección multicast para UPnP.
 
 Afortunadamente, el router de mi red local no tenía activado UPnP, por lo que no
 hubo ningún conflicto. No obstante, la dirección se ha actualizado para usar una
-no reservada.
+no reservada en el código final.
 
 ## Datos enviados al grupo multicast
 

@@ -30,7 +30,9 @@ ifeq ($(UNAME), Linux)
 endif
 
 ifeq ($(UNAME), Darwin)
-	CFLAGS := $(CFLAGS) -DDARWIN -D_DARWIN_C_SOURCE
+	CFLAGS := $(CFLAGS) -DDARWIN -D_DARWIN_C_SOURCE \
+	                    -DIPV6_ADD_MEMBERSHIP=IPV6_JOIN_GROUP \
+	                    -DIPV6_DROP_MEMBERSHIP=IPV6_LEAVE_GROUP
 endif
 
 TARGET_NAMES := server client
